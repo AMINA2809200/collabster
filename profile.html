@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collabster — профиль</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabaseClient.js"></script>
+</head>
+<body>
+<header>
+  <a href="feed.html">COLLABSTER</a>
+  <nav><a href="feed.html">К ленте</a></nav>
+</header>
+<main id="main">Загрузка…</main>
+
+<script>
+const viewedId = new URLSearchParams(window.location.search).get("id");
+let me, profile, isOwn, targetId;
+
+function mediaHtml(urls) {
+  if (!urls || !urls.length) return "";
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">` +
+    urls.map((u) => isVideoUrl(u)
+      ? `<video src="${u}" controls style="flex:none;max-width:160px;max-height:160px;border-radius:8px;"></video>`
+      : `<img src="${u}" style="flex:none;max-width:160px;max-height:160px;border-radius:8px;object-fit:cover;" />`
+    ).join("") + `</div>`;
+}
+
+async function loadCoworkers(id) {
+  const { data: asAuthor } = await sb.from("projects").select("id").eq("author_id", id).eq("status", "completed");
+  const { data: asMember } = await sb.from("project_members").select("project_id, projects!inner(status)").eq("profile_id", id).eq("projects.status", "completed");
+
+  const projectIds = new Set([...(asAuthor || []).map((p) => p.id), ...(asMember || []).map((m) => m.project_id)]);
+  if (projectIds.size === 0) return [];
+
+  const ids = Array.from(projectIds);
+  const { data: projectsData } = await sb.from("projects").select("id, author_id").in("id", ids);
+  const { data: membersData } = await sb.from("project_members").select("project_id, profile_id").in("project_id", ids);
+
+  const peopleIds = new Set();
+  (projectsData || []).forEach((p) => peopleIds.add(p.author_id));
+  (membersData || []).forEach((m) => peopleIds.add(m.profile_id));
+  peopleIds.delete(id);
+
+  if (peopleIds.size === 0) return [];
+  const { data: people } = await sb.from("profiles").select("id, name, avatar_url").in("id", Array.from(peopleIds));
+  return people || [];
+}
+
+async function load() {
+  me = await requireAuth();
+  if (!me) return;
+  targetId = viewedId || me.id;
+  isOwn = targetId === me.id;
+
+  const { data: p } = await sb.from("profiles").select("*").eq("id", targetId).single();
+  profile = p;
+
+  const { data: ratings } = await sb.from("ratings").select("stars,review").eq("ratee_id", targetId);
+  const { data: portfolio } = await sb.from("portfolio_items")
+    .select("*, projects(id, created_at, completed_at, author_id, profiles!projects_author_id_fkey(name,id))")
+    .eq("profile_id", targetId).order("created_at", { ascending: false });
+  const { data: completedAsMember } = await sb.from("project_members").select("project_id, projects!inner(status)").eq("profile_id", targetId).eq("projects.status", "completed");
+  const { data: completedAsAuthor } = await sb.from("projects").select("id").eq("author_id", targetId).eq("status", "completed");
+  const completedCount = (completedAsMember || []).length + (completedAsAuthor || []).length;
+  const coworkers = await loadCoworkers(targetId);
+
+  const badge = (!ratings || ratings.length === 0)
+    ? '<span class="badge badge-new">Новичок</span>'
+    : `<span class="badge badge-rating">★ ${(ratings.reduce((s, r) => s + r.stars, 0) / ratings.length).toFixed(1)}</span>`;
+
+  const avatarHtml = profile.avatar_url
+    ? `<img src="${profile.avatar_url}" style="width:88px;height:88px;border-radius:50%;object-fit:cover;" />`
+    : `<div style="width:88px;height:88px;border-radius:50%;background:#0A0A0B;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Archivo',sans-serif;font-weight:800;font-size:28px;">${escapeHtml((profile.name || "?")[0].toUpperCase())}</div>`;
+
+  let html = `
+    <div style="display:flex;align-items:center;gap:16px;">
+      ${avatarHtml}
+      <div>
+        <h1 style="margin:0;">${escapeHtml(profile.name)} ${badge}</h1>
+        <p class="muted" style="margin:4px 0;">${escapeHtml(profile.city || "")} · ${escapeHtml(profile.availability)}</p>
+      </div>
+    </div>
+    <p>${(profile.roles || []).map((r) => `<span class="badge badge-open">${escapeHtml(r)}</span>`).join(" ")}</p>
+    <p>${escapeHtml(profile.bio || "")}</p>
+    <p class="muted">Завершённых проектов: ${completedCount}</p>
+  `;
+
+  if (isOwn) {
+    html += `<a href="onboarding.html"><button>Редактировать профиль</button></a>`;
+    const { data: myInvites } = await sb.from("invites").select("code, is_used").eq("created_by", targetId);
+    if (myInvites && myInvites.length) {
+      html += `<h2>Мои инвайты</h2><div class="card">` +
+        myInvites.map((i) => `<p>${i.is_used ? "✓ использован" : "<b>" + escapeHtml(i.code) + "</b>"}</p>`).join("") +
+        `<p class="muted">Эти коды ты получаешь после первого завершённого проекта — отправь другу, чтобы он мог зарегистрироваться.</p></div>`;
+    }
+  } else {
+    html += `<button id="btnBlock" class="danger">Скрыть (Block)</button> <button id="btnReport" class="secondary">Пожаловаться (Report)</button>`;
+  }
+
+  html += `<h2>С кем работал</h2><div id="coworkersBox"></div>`;
+  html += `<h2>Портфолио</h2><div id="portfolioBox"></div>`;
+  html += `<h2>Отзывы</h2><div id="reviewsBox"></div>`;
+
+  document.getElementById("main").innerHTML = html;
+
+  document.getElementById("coworkersBox").innerHTML = coworkers.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:10px;">` + coworkers.map((c) => `
+        <a href="profile.html?id=${c.id}" style="flex:none;text-align:center;text-decoration:none;color:inherit;width:72px;">
+          ${c.avatar_url
+            ? `<img src="${c.avatar_url}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;" />`
+            : `<div style="width:56px;height:56px;border-radius:50%;background:#0A0A0B;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Archivo',sans-serif;font-weight:800;margin:0 auto;">${escapeHtml((c.name || "?")[0].toUpperCase())}</div>`}
+          <div class="muted" style="font-size:12px;margin-top:4px;">${escapeHtml(c.name)}</div>
+        </a>
+      `).join("") + `</div>`
+    : '<p class="muted">Пока ни с кем не работал(а) в завершённых проектах.</p>';
+
+  document.getElementById("portfolioBox").innerHTML = (portfolio && portfolio.length)
+    ? portfolio.map((it) => {
+        const proj = it.projects;
+        const dateStr = proj ? new Date(proj.completed_at || proj.created_at).toLocaleDateString("ru-RU") : "";
+        const clientLine = proj && proj.profiles && proj.profiles.id !== targetId
+          ? `<p class="muted">Проект от: <a href="profile.html?id=${proj.profiles.id}">${escapeHtml(proj.profiles.name)}</a></p>`
+          : "";
+        return `<div class="card">
+          <h3 style="margin:0 0 4px;">${escapeHtml(it.title)}</h3>
+          <p class="muted" style="margin:0 0 6px;">${it.role_name ? escapeHtml(it.role_name) + (dateStr ? " · " : "") : ""}${dateStr}</p>
+          ${clientLine}
+          ${it.description ? `<p>${escapeHtml(it.description)}</p>` : ""}
+          ${mediaHtml(it.media_urls)}
+        </div>`;
+      }).join("")
+    : '<p class="muted">Пока пусто.</p>';
+
+  document.getElementById("reviewsBox").innerHTML = (ratings && ratings.length)
+    ? ratings.filter((r) => r.review).map((r) => `<div class="card">"${escapeHtml(r.review)}" — ${r.stars}★</div>`).join("")
+    : '<p class="muted">Отзывов пока нет.</p>';
+
+  if (!isOwn) {
+    document.getElementById("btnBlock").onclick = async () => {
+      if (!(await customConfirm("Скрыть этого пользователя из своей ленты и поиска?"))) return;
+      await sb.from("blocks").insert({ blocker_id: me.id, blocked_id: targetId });
+      await customAlert("Пользователь скрыт.");
+    };
+    document.getElementById("btnReport").onclick = async () => {
+      const category = await customPrompt("Категория жалобы:", ["Спам", "Мошенничество/фейковый профиль", "Неадекватное поведение", "Не вышел на проект"]);
+      if (!category) return;
+      await sb.from("reports").insert({ reporter_id: me.id, reported_id: targetId, category });
+      await customAlert("Жалоба отправлена на рассмотрение.");
+    };
+  }
+}
+
+load();
+</script>
+</body>
+</html>

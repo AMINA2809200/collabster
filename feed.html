@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collabster — лента</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabaseClient.js"></script>
+</head>
+<body>
+<header>
+  <a href="feed.html">COLLABSTER</a>
+  <nav>
+    <a href="project-new.html">+ Создать проект</a>
+    <a href="profile.html">Мой профиль</a>
+    <a href="#" id="logoutLink">Выйти</a>
+  </nav>
+</header>
+<main>
+  <span class="kicker">Collabster / Проекты</span>
+  <h1>Лента проектов</h1>
+  <div class="filters">
+    <select id="fRole"><option value="">Любая роль</option></select>
+    <select id="fType">
+      <option value="">Любой тип</option>
+      <option>творческий</option>
+      <option>бизнес</option>
+      <option>хакатон</option>
+    </select>
+    <select id="fFormat">
+      <option value="">Любой формат</option>
+      <option>онлайн</option>
+      <option>офлайн</option>
+    </select>
+    <input id="fCity" placeholder="Город" style="flex:1; min-width:140px;" />
+  </div>
+  <div id="list"></div>
+</main>
+
+<script>
+let me, blockedIds = [];
+
+async function badgeFor(profileId) {
+  const { data: ratings } = await sb.from("ratings").select("stars").eq("ratee_id", profileId);
+  if (!ratings || ratings.length === 0) return '<span class="badge badge-new">Новичок</span>';
+  const avg = (ratings.reduce((s, r) => s + r.stars, 0) / ratings.length).toFixed(1);
+  return `<span class="badge badge-rating">★ ${avg}</span>`;
+}
+
+async function loadFeed() {
+  const { data: projects } = await sb
+    .from("projects")
+    .select("*, profiles!projects_author_id_fkey(name,city), project_roles(*)")
+    .eq("status", "recruiting")
+    .order("created_at", { ascending: false });
+
+  const roleFilter = document.getElementById("fRole").value;
+  const typeFilter = document.getElementById("fType").value;
+  const formatFilter = document.getElementById("fFormat").value;
+  const cityFilter = document.getElementById("fCity").value.trim().toLowerCase();
+
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  const allRoles = new Set();
+
+  for (const p of projects || []) {
+    if (blockedIds.includes(p.author_id)) continue;
+    const openRoles = (p.project_roles || []).filter((r) => r.status === "open" && r.slots_filled < r.slots_needed);
+    openRoles.forEach((r) => allRoles.add(r.role_name));
+    if (openRoles.length === 0) continue;
+    if (typeFilter && p.project_type !== typeFilter) continue;
+    if (formatFilter && p.format !== formatFilter) continue;
+    if (cityFilter && !(p.city || "").toLowerCase().includes(cityFilter)) continue;
+    if (roleFilter && !openRoles.some((r) => r.role_name === roleFilter)) continue;
+
+    const card = document.createElement("div");
+    card.className = "card";
+    const badge = await badgeFor(p.author_id);
+    card.innerHTML = `
+      <h3><a href="project.html?id=${p.id}">${escapeHtml(p.title)}</a></h3>
+      <p>${escapeHtml(p.description)}</p>
+      <p class="muted">${escapeHtml(p.project_type)} · ${escapeHtml(p.format)} ${p.city ? "· " + escapeHtml(p.city) : ""}</p>
+      <p>Нужны роли: ${openRoles.map((r) => `<span class="badge badge-open">${escapeHtml(r.role_name)} (${r.slots_needed - r.slots_filled})</span>`).join(" ")}</p>
+      <p class="muted">Автор: ${escapeHtml(p.profiles ? p.profiles.name : "—")} ${badge}</p>
+    `;
+    list.appendChild(card);
+  }
+
+  if (!list.children.length) {
+    list.innerHTML = '<p class="muted">Подходящих проектов пока нет.</p>';
+  }
+
+  const roleSelect = document.getElementById("fRole");
+  const current = roleSelect.value;
+  roleSelect.innerHTML = '<option value="">Любая роль</option>' +
+    Array.from(allRoles).map((r) => `<option ${r === current ? "selected" : ""}>${escapeHtml(r)}</option>`).join("");
+}
+
+["fRole", "fType", "fFormat"].forEach((id) => document.getElementById(id).addEventListener("change", loadFeed));
+document.getElementById("fCity").addEventListener("input", loadFeed);
+document.getElementById("logoutLink").onclick = (e) => { e.preventDefault(); logout(); };
+
+(async () => {
+  me = await requireAuth();
+  if (!me) return;
+  const { data: blocks } = await sb.from("blocks").select("blocked_id").eq("blocker_id", me.id);
+  blockedIds = (blocks || []).map((b) => b.blocked_id);
+  loadFeed();
+})();
+</script>
+</body>
+</html>

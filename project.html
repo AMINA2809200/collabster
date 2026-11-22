@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collabster — проект</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabaseClient.js"></script>
+</head>
+<body>
+<header>
+  <a href="feed.html">COLLABSTER</a>
+  <nav><a href="feed.html">К ленте</a></nav>
+</header>
+<main id="main">Загрузка…</main>
+
+<script>
+const projectId = new URLSearchParams(window.location.search).get("id");
+let me, project, roles, members, isAuthor;
+
+async function badgeFor(profileId) {
+  const { data: ratings } = await sb.from("ratings").select("stars").eq("ratee_id", profileId);
+  if (!ratings || ratings.length === 0) return '<span class="badge badge-new">Новичок</span>';
+  const avg = (ratings.reduce((s, r) => s + r.stars, 0) / ratings.length).toFixed(1);
+  return `<span class="badge badge-rating">★ ${avg}</span>`;
+}
+
+async function load() {
+  me = await requireAuth();
+  if (!me) return;
+
+  const { data: p } = await sb.from("projects").select("*, profiles!projects_author_id_fkey(name,city,id)").eq("id", projectId).single();
+  project = p;
+  isAuthor = project.author_id === me.id;
+
+  const { data: r } = await sb.from("project_roles").select("*").eq("project_id", projectId);
+  roles = r || [];
+
+  const { data: m } = await sb.from("project_members").select("*, profiles(name,id)").eq("project_id", projectId);
+  members = m || [];
+
+  render();
+}
+
+async function render() {
+  const main = document.getElementById("main");
+  const authorBadge = await badgeFor(project.author_id);
+
+  let html = `
+    <h1>${escapeHtml(project.title)}</h1>
+    <p class="muted">${escapeHtml(project.project_type)} · ${escapeHtml(project.format)} ${project.city ? "· " + escapeHtml(project.city) : ""} · статус: <b>${escapeHtml(project.status)}</b></p>
+    <p>${escapeHtml(project.description)}</p>
+    <p class="muted">Автор: ${escapeHtml(project.profiles.name)} ${authorBadge}</p>
+  `;
+
+  html += "<h2>Роли</h2>";
+  for (const role of roles) {
+    const open = role.status === "open" && role.slots_filled < role.slots_needed;
+    html += `<div class="card" data-role="${role.id}">
+      <b>${escapeHtml(role.role_name)}</b>
+      <span class="badge ${open ? "badge-open" : "badge-closed"}">${open ? "открыто" : "закрыто"} (${role.slots_filled}/${role.slots_needed})</span>
+      <div class="role-body"></div>
+    </div>`;
+  }
+
+  if (project.status !== "completed" && project.status !== "cancelled") {
+    html += isAuthor
+      ? '<button id="btnComplete">Завершить проект</button>'
+      : "";
+  }
+
+  html += `<h2>Команда</h2><div id="teamBox"></div>`;
+
+  if (isAuthor || members.some((m) => m.profile_id === me.id)) {
+    html += `<h2>Чат</h2><div class="card"><div id="chatBox" style="max-height:260px;overflow-y:auto;"></div>
+      <div class="row"><input id="chatInput" placeholder="Сообщение..." /><button id="btnSend">Отправить</button></div></div>`;
+  }
+
+  if (project.status === "completed") {
+    html += `<h2>Оценить участников</h2><div id="rateBox"></div>`;
+  }
+
+  main.innerHTML = html;
+
+  for (const role of roles) {
+    const body = document.querySelector(`[data-role="${role.id}"] .role-body`);
+    if (isAuthor) {
+      await renderApplicationsForRole(role, body);
+    } else {
+      await renderApplyForRole(role, body);
+    }
+  }
+
+  renderTeam();
+  if (document.getElementById("chatBox")) loadChat();
+  if (document.getElementById("btnComplete")) {
+    document.getElementById("btnComplete").onclick = completeProject;
+  }
+  if (document.getElementById("rateBox")) renderRatingForm();
+}
+
+async function renderApplicationsForRole(role, body) {
+  const { data: apps } = await sb.from("applications").select("*, profiles(name,id)").eq("project_role_id", role.id).eq("status", "pending");
+  if (!apps || apps.length === 0) { body.innerHTML = '<p class="muted">Заявок пока нет.</p>'; return; }
+  body.innerHTML = apps.map((a) => `
+    <div class="card" style="margin-top:8px">
+      <a href="profile.html?id=${a.profiles.id}">${escapeHtml(a.profiles.name)}</a>
+      <p class="muted">${escapeHtml(a.message || "")}</p>
+      <button data-accept="${a.id}">Принять</button>
+      <button data-decline="${a.id}" class="secondary">Отклонить</button>
+    </div>
+  `).join("");
+  body.querySelectorAll("[data-accept]").forEach((b) => b.onclick = () => acceptApplication(b.dataset.accept, role));
+  body.querySelectorAll("[data-decline]").forEach((b) => b.onclick = () => declineApplication(b.dataset.decline));
+}
+
+async function renderApplyForRole(role, body) {
+  const open = role.status === "open" && role.slots_filled < role.slots_needed && project.status === "recruiting";
+  const { data: mine } = await sb.from("applications").select("*").eq("project_role_id", role.id).eq("applicant_id", me.id).maybeSingle();
+  if (mine) {
+    body.innerHTML = `<p class="muted">Твоя заявка: ${escapeHtml(mine.status)}</p>`;
+    return;
+  }
+  if (!open) { body.innerHTML = ""; return; }
+  body.innerHTML = `
+    <textarea data-msg rows="2" placeholder="Почему я подхожу?"></textarea>
+    <button data-apply>Откликнуться</button>
+  `;
+  body.querySelector("[data-apply]").onclick = async () => {
+    const message = body.querySelector("[data-msg]").value.trim();
+    const { error } = await sb.from("applications").insert({ project_role_id: role.id, applicant_id: me.id, message });
+    if (!error) load(); else await customAlert(error.message);
+  };
+}
+
+async function acceptApplication(appId, role) {
+  await sb.from("applications").update({ status: "accepted" }).eq("id", appId);
+  const { data: app } = await sb.from("applications").select("*").eq("id", appId).single();
+
+  const newFilled = role.slots_filled + 1;
+  const closed = newFilled >= role.slots_needed;
+  await sb.from("project_roles").update({ slots_filled: newFilled, status: closed ? "closed" : "open" }).eq("id", role.id);
+
+  await sb.from("project_members").insert({ project_id: projectId, profile_id: app.applicant_id, role_name: role.role_name });
+
+  if (closed) {
+    const { data: others } = await sb.from("applications").select("*").eq("project_role_id", role.id).eq("status", "pending");
+    for (const o of others || []) {
+      await sb.from("applications").update({ status: "declined" }).eq("id", o.id);
+    }
+  }
+
+  const { data: allRoles } = await sb.from("project_roles").select("*").eq("project_id", projectId);
+  if ((allRoles || []).every((r) => r.status === "closed")) {
+    await sb.from("projects").update({ status: "team_full" }).eq("id", projectId);
+  }
+
+  load();
+}
+
+async function declineApplication(appId) {
+  await sb.from("applications").update({ status: "declined" }).eq("id", appId);
+  load();
+}
+
+function renderTeam() {
+  const box = document.getElementById("teamBox");
+  const all = [{ profiles: project.profiles, role_name: "Автор" }, ...members];
+  box.innerHTML = all.map((m) => `
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+      <span><a href="profile.html?id=${m.profiles.id}">${escapeHtml(m.profiles.name)}</a> — ${escapeHtml(m.role_name)}</span>
+      ${m.profiles.id !== me.id ? `<span><a href="#" data-report="${m.profiles.id}">Report</a> · <a href="#" data-block="${m.profiles.id}">Block</a></span>` : ""}
+    </div>
+  `).join("");
+  box.querySelectorAll("[data-report]").forEach((a) => a.onclick = async (e) => {
+    e.preventDefault();
+    const category = await customPrompt("Категория жалобы:", ["Спам", "Мошенничество/фейковый профиль", "Неадекватное поведение", "Не вышел на проект"]);
+    if (!category) return;
+    await sb.from("reports").insert({ reporter_id: me.id, reported_id: a.dataset.report, category });
+    await customAlert("Жалоба отправлена на рассмотрение.");
+  });
+  box.querySelectorAll("[data-block]").forEach((a) => a.onclick = async (e) => {
+    e.preventDefault();
+    if (!(await customConfirm("Скрыть этого пользователя из своей ленты и поиска?"))) return;
+    await sb.from("blocks").insert({ blocker_id: me.id, blocked_id: a.dataset.block });
+    await customAlert("Пользователь скрыт.");
+  });
+}
+
+let chatChannel = null;
+
+async function loadChat() {
+  const { data: msgs } = await sb.from("messages").select("*, profiles(name)").eq("project_id", projectId).order("created_at");
+  const box = document.getElementById("chatBox");
+  if (!box) return;
+  box.innerHTML = (msgs || []).map((m) => `
+    <div class="msg ${m.sender_id === me.id ? "mine" : "theirs"}"><b>${escapeHtml(m.profiles.name)}:</b> ${escapeHtml(m.body)}</div>
+  `).join("");
+  box.scrollTop = box.scrollHeight;
+
+  document.getElementById("btnSend").onclick = async () => {
+    const input = document.getElementById("chatInput");
+    const body = input.value.trim();
+    if (!body) return;
+    await sb.from("messages").insert({ project_id: projectId, sender_id: me.id, body });
+    input.value = "";
+    loadChat();
+  };
+
+  if (!chatChannel) {
+    chatChannel = sb.channel("messages-" + projectId)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: "project_id=eq." + projectId }, () => loadChat())
+      .subscribe();
+  }
+}
+
+async function completeProject() {
+  if (!(await customConfirm("Завершить проект? Это запустит оценку участников и добавит проект в портфолио всем."))) return;
+  await sb.from("projects").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", projectId);
+
+  const allPeople = [
+    { id: project.author_id, role_name: "Автор" },
+    ...members.map((m) => ({ id: m.profile_id, role_name: m.role_name })),
+  ];
+  for (const person of allPeople) {
+    const { data: existing } = await sb.from("portfolio_items").select("id").eq("profile_id", person.id).eq("project_id", projectId).maybeSingle();
+    if (!existing) {
+      await sb.from("portfolio_items").insert({ profile_id: person.id, project_id: projectId, title: project.title, description: project.description, role_name: person.role_name });
+    }
+    await grantInvitesIfFirstTime(person.id);
+  }
+  load();
+}
+
+async function renderRatingForm() {
+  const others = [{ id: project.author_id, name: project.profiles.name }, ...members.map((m) => ({ id: m.profile_id, name: m.profiles.name }))]
+    .filter((p) => p.id !== me.id);
+  const box = document.getElementById("rateBox");
+  box.innerHTML = "";
+  for (const person of others) {
+    const { data: already } = await sb.from("ratings").select("id").eq("project_id", projectId).eq("rater_id", me.id).eq("ratee_id", person.id).maybeSingle();
+    const card = document.createElement("div");
+    card.className = "card";
+    if (already) {
+      card.innerHTML = `<b>${escapeHtml(person.name)}</b> — оценка уже оставлена.`;
+    } else {
+      card.innerHTML = `
+        <b>${escapeHtml(person.name)}</b>
+        <select data-stars>
+          <option value="5">★★★★★</option>
+          <option value="4">★★★★</option>
+          <option value="3">★★★</option>
+          <option value="2">★★</option>
+          <option value="1">★</option>
+        </select>
+        <textarea data-review rows="2" placeholder="Короткий отзыв"></textarea>
+        <button data-submit>Оставить оценку</button>
+      `;
+      card.querySelector("[data-submit]").onclick = async () => {
+        const stars = parseInt(card.querySelector("[data-stars]").value, 10);
+        const review = card.querySelector("[data-review]").value.trim();
+        await sb.from("ratings").insert({ project_id: projectId, rater_id: me.id, ratee_id: person.id, stars, review });
+        renderRatingForm();
+      };
+    }
+    box.appendChild(card);
+  }
+}
+
+load();
+</script>
+</body>
+</html>

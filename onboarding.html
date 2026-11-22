@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collabster — профиль</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabaseClient.js"></script>
+</head>
+<body>
+<header><a href="feed.html">COLLABSTER</a></header>
+<main>
+  <span class="kicker">Твой профиль</span>
+  <h1>Расскажи о себе</h1>
+  <div class="card">
+    <label>Фото профиля</label>
+    <div style="display:flex;align-items:center;gap:14px;">
+      <img id="avatarPreview" src="" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;background:#eee;display:none;" />
+      <div id="avatarPlaceholder" style="width:72px;height:72px;border-radius:50%;background:#0A0A0B;display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Archivo',sans-serif;font-weight:800;">?</div>
+      <input id="avatarFile" type="file" accept="image/*" />
+    </div>
+    <label>Имя</label>
+    <input id="name" />
+    <label>Город</label>
+    <input id="city" />
+    <label>Роли / направления (через запятую)</label>
+    <input id="roles" placeholder="фотограф, дизайнер" />
+    <label>О себе</label>
+    <textarea id="bio" rows="3"></textarea>
+    <label>Статус доступности</label>
+    <select id="availability">
+      <option>ищу проект</option>
+      <option>собираю команду</option>
+      <option>занят</option>
+    </select>
+    <button id="btnSave">Сохранить и продолжить</button>
+    <div id="err" class="error"></div>
+  </div>
+
+  <h2>Портфолио (можно пропустить и заполнить позже)</h2>
+  <div class="card">
+    <label>Название работы</label>
+    <input id="pTitle" />
+    <label>Описание</label>
+    <textarea id="pDescription" rows="2" placeholder="Коротко, что это за работа"></textarea>
+    <label>Фото / видео</label>
+    <input id="pFiles" type="file" accept="image/*,video/*" multiple />
+    <button id="btnAddPortfolio" class="secondary">Добавить в портфолио</button>
+    <div id="portfolioList"></div>
+  </div>
+
+  <button id="btnFinish">Готово — к ленте проектов</button>
+</main>
+
+<script>
+let profile, userId;
+(async () => {
+  const user = await requireAuth();
+  if (!user) return;
+  userId = user.id;
+  profile = await getMyProfile();
+  if (profile) {
+    document.getElementById("name").value = profile.name || "";
+    document.getElementById("city").value = profile.city || "";
+    document.getElementById("roles").value = (profile.roles || []).join(", ");
+    document.getElementById("bio").value = profile.bio || "";
+    document.getElementById("availability").value = profile.availability || "ищу проект";
+    showAvatar(profile.avatar_url);
+  }
+  loadPortfolio();
+})();
+
+function showAvatar(url) {
+  const img = document.getElementById("avatarPreview");
+  const placeholder = document.getElementById("avatarPlaceholder");
+  if (url) {
+    img.src = url;
+    img.style.display = "block";
+    placeholder.style.display = "none";
+  } else {
+    img.style.display = "none";
+    placeholder.style.display = "flex";
+  }
+}
+
+document.getElementById("avatarFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const errBox = document.getElementById("err");
+  errBox.textContent = "Загрузка фото...";
+  try {
+    const url = await uploadFile("avatars", userId, file);
+    await sb.from("profiles").update({ avatar_url: url }).eq("id", userId);
+    showAvatar(url);
+    errBox.textContent = "Фото обновлено.";
+  } catch (err) {
+    errBox.textContent = "Ошибка загрузки: " + err.message;
+  }
+};
+
+async function loadPortfolio() {
+  const { data } = await sb.from("portfolio_items").select("*").eq("profile_id", userId).order("created_at", { ascending: false });
+  const list = document.getElementById("portfolioList");
+  list.innerHTML = "";
+  (data || []).forEach((item) => {
+    const d = document.createElement("div");
+    d.className = "muted";
+    d.textContent = "• " + item.title + (item.media_urls && item.media_urls.length ? ` (медиа: ${item.media_urls.length})` : "");
+    list.appendChild(d);
+  });
+}
+
+document.getElementById("btnSave").onclick = async () => {
+  const roles = document.getElementById("roles").value.split(",").map((r) => r.trim()).filter(Boolean);
+  const { error } = await sb.from("profiles").update({
+    name: document.getElementById("name").value.trim(),
+    city: document.getElementById("city").value.trim(),
+    roles,
+    bio: document.getElementById("bio").value.trim(),
+    availability: document.getElementById("availability").value,
+  }).eq("id", userId);
+  document.getElementById("err").textContent = error ? error.message : "Сохранено.";
+};
+
+document.getElementById("btnAddPortfolio").onclick = async () => {
+  const errBox = document.getElementById("err");
+  const title = document.getElementById("pTitle").value.trim();
+  const description = document.getElementById("pDescription").value.trim();
+  const files = Array.from(document.getElementById("pFiles").files || []);
+  if (!title) return;
+  errBox.textContent = files.length ? "Загрузка файлов..." : "";
+  try {
+    const media_urls = [];
+    for (const file of files) {
+      media_urls.push(await uploadFile("portfolio-media", userId, file));
+    }
+    await sb.from("portfolio_items").insert({ profile_id: userId, title, description, media_urls });
+    document.getElementById("pTitle").value = "";
+    document.getElementById("pDescription").value = "";
+    document.getElementById("pFiles").value = "";
+    errBox.textContent = "Добавлено в портфолио.";
+    loadPortfolio();
+  } catch (err) {
+    errBox.textContent = "Ошибка загрузки: " + err.message;
+  }
+};
+
+document.getElementById("btnFinish").onclick = () => (window.location.href = "feed.html");
+</script>
+</body>
+</html>

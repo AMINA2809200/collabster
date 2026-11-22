@@ -1,0 +1,160 @@
+* { box-sizing: border-box; }
+
+:root {
+  --blue: #1F3AF0;
+  --black: #0A0A0B;
+  --white: #FFFFFF;
+  --gray: #6B6B70;
+  --gray-light: #E4E4E7;
+  --danger: #D21F3C;
+}
+
+body {
+  font-family: 'Inter', Arial, sans-serif;
+  background: var(--white);
+  color: var(--black);
+  margin: 0;
+  padding-bottom: 60px;
+}
+
+header {
+  background: var(--black);
+  color: var(--white);
+  padding: 18px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 3px solid var(--blue);
+}
+header a {
+  color: var(--white);
+  text-decoration: none;
+  font-family: 'Archivo', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-size: 18px;
+  text-transform: uppercase;
+}
+header nav a {
+  margin-left: 18px;
+  color: var(--white);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+header nav a:hover { opacity: 1; color: var(--blue); }
+
+main { max-width: 720px; margin: 0 auto; padding: 28px 16px; }
+
+h1, h2, h3 {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  color: var(--black);
+  line-height: 1.1;
+}
+h1 { font-size: 30px; margin: 0 0 6px; }
+h2 { font-size: 18px; margin: 32px 0 12px; }
+h3 { font-size: 15px; margin: 0 0 6px; }
+
+.kicker {
+  display: block;
+  font-family: 'Archivo', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin-bottom: 8px;
+}
+
+.card {
+  background: var(--white);
+  border: 1.5px solid var(--black);
+  border-radius: 2px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1.5px solid var(--black);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--white);
+  color: var(--black);
+}
+.badge-new { border-color: var(--gray); color: var(--gray); }
+.badge-rating { border-color: var(--blue); color: var(--blue); }
+.badge-open { border-color: var(--blue); color: var(--blue); }
+.badge-closed { border-color: var(--gray-light); color: var(--gray); }
+
+label {
+  display: block;
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--black);
+}
+input, select, textarea {
+  width: 100%;
+  padding: 10px;
+  margin-top: 6px;
+  border: 1.5px solid var(--black);
+  border-radius: 2px;
+  font-size: 14px;
+  font-family: 'Inter', Arial, sans-serif;
+  background: var(--white);
+  color: var(--black);
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--blue); }
+
+button {
+  background: var(--black);
+  color: var(--white);
+  border: 1.5px solid var(--black);
+  padding: 11px 18px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 12px;
+  font-family: 'Archivo', sans-serif;
+}
+button:hover { background: var(--blue); border-color: var(--blue); }
+button.secondary { background: var(--white); color: var(--black); }
+button.secondary:hover { background: var(--black); color: var(--white); border-color: var(--black); }
+button.danger { background: var(--white); color: var(--danger); border-color: var(--danger); }
+button.danger:hover { background: var(--danger); color: var(--white); }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 140px; }
+
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.filters select { width: auto; }
+
+.msg { padding: 8px 10px; border-radius: 2px; margin-bottom: 6px; max-width: 80%; font-size: 14px; border: 1.5px solid var(--gray-light); }
+.msg.mine { background: var(--black); color: var(--white); margin-left: auto; border-color: var(--black); }
+.msg.theirs { background: var(--white); border-color: var(--black); }
+
+.error { color: var(--danger); font-size: 13px; margin-top: 8px; font-weight: 600; }
+.muted { color: var(--gray); font-size: 13px; }
+
+.tabs { display: flex; gap: 0; margin-bottom: 20px; border: 1.5px solid var(--black); border-radius: 2px; overflow: hidden; width: fit-content; }
+.tabs button {
+  background: var(--white); color: var(--black); margin: 0; border: none; border-radius: 0;
+  border-right: 1.5px solid var(--black);
+}
+.tabs button:last-child { border-right: none; }
+.tabs button.active { background: var(--black); color: var(--white); }

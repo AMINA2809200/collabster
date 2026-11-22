@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collabster — новый проект</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabaseClient.js"></script>
+</head>
+<body>
+<header>
+  <a href="feed.html">COLLABSTER</a>
+  <nav><a href="feed.html">К ленте</a></nav>
+</header>
+<main>
+  <span class="kicker">Новый проект</span>
+  <h1>Создать проект</h1>
+  <p class="muted">Все проекты в MVP — без оплаты, за опыт и портфолио.</p>
+  <div class="card">
+    <label>Название проекта</label>
+    <input id="title" />
+    <label>Суть проекта (кратко, без полного раскрытия идеи)</label>
+    <textarea id="description" rows="3"></textarea>
+    <div class="row">
+      <div>
+        <label>Тип проекта</label>
+        <select id="type">
+          <option>творческий</option>
+          <option>бизнес</option>
+          <option>хакатон</option>
+        </select>
+      </div>
+      <div>
+        <label>Формат</label>
+        <select id="format">
+          <option>онлайн</option>
+          <option>офлайн</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Город</label>
+        <input id="city" />
+      </div>
+      <div>
+        <label>Срок (дедлайн)</label>
+        <input id="deadline" type="date" />
+      </div>
+    </div>
+
+    <h3>Нужные роли</h3>
+    <div id="rolesList"></div>
+    <div class="row">
+      <input id="newRoleName" placeholder="Например: Фотограф" />
+      <input id="newRoleCount" type="number" min="1" value="1" style="max-width:100px" />
+      <button id="btnAddRole" class="secondary">Добавить роль</button>
+    </div>
+
+    <button id="btnPublish">Опубликовать проект</button>
+    <div id="err" class="error"></div>
+  </div>
+</main>
+
+<script>
+let roles = [];
+
+function renderRoles() {
+  const box = document.getElementById("rolesList");
+  box.innerHTML = roles.map((r, i) =>
+    `<span class="badge badge-open">${escapeHtml(r.role_name)} × ${r.slots_needed} <a href="#" data-i="${i}" style="color:#0f6e56">✕</a></span> `
+  ).join(" ");
+  box.querySelectorAll("a").forEach((a) => {
+    a.onclick = (e) => { e.preventDefault(); roles.splice(+a.dataset.i, 1); renderRoles(); };
+  });
+}
+
+document.getElementById("btnAddRole").onclick = () => {
+  const name = document.getElementById("newRoleName").value.trim();
+  const count = parseInt(document.getElementById("newRoleCount").value, 10) || 1;
+  if (!name) return;
+  roles.push({ role_name: name, slots_needed: count });
+  document.getElementById("newRoleName").value = "";
+  document.getElementById("newRoleCount").value = 1;
+  renderRoles();
+};
+
+document.getElementById("btnPublish").onclick = async () => {
+  const err = document.getElementById("err");
+  err.textContent = "";
+  const title = document.getElementById("title").value.trim();
+  const description = document.getElementById("description").value.trim();
+  if (!title || !description || roles.length === 0) {
+    err.textContent = "Укажи название, описание и хотя бы одну роль.";
+    return;
+  }
+  const user = (await sb.auth.getSession()).data.session.user;
+
+  const { data: project, error } = await sb.from("projects").insert({
+    author_id: user.id,
+    title,
+    description,
+    project_type: document.getElementById("type").value,
+    format: document.getElementById("format").value,
+    city: document.getElementById("city").value.trim(),
+    deadline: document.getElementById("deadline").value || null,
+  }).select().single();
+
+  if (error) { err.textContent = error.message; return; }
+
+  const rolesPayload = roles.map((r) => ({ project_id: project.id, role_name: r.role_name, slots_needed: r.slots_needed }));
+  const { error: rolesErr } = await sb.from("project_roles").insert(rolesPayload);
+  if (rolesErr) { err.textContent = rolesErr.message; return; }
+
+  window.location.href = "project.html?id=" + project.id;
+};
+
+(async () => { await requireAuth(); })();
+</script>
+</body>
+</html>

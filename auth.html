@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collabster — вход</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabaseClient.js"></script>
+</head>
+<body>
+<header><a href="auth.html">COLLABSTER</a></header>
+<main>
+  <span class="kicker">Платформа для команд</span>
+  <h1>Collabster</h1>
+  <p class="muted">Найди команду под проект или проект под свою роль — по доверию и портфолио, а не по резюме.</p>
+
+  <div class="tabs">
+    <button id="tabRegister" class="active">Регистрация по инвайту</button>
+    <button id="tabLogin">Вход</button>
+  </div>
+
+  <div id="registerForm" class="card">
+    <label>Инвайт-код</label>
+    <input id="inviteCode" placeholder="например, COLLAB2026" />
+    <label>Email</label>
+    <input id="regEmail" type="email" placeholder="you@example.com" />
+    <label>Пароль</label>
+    <input id="regPassword" type="password" placeholder="минимум 6 символов" />
+    <button id="btnRegister">Зарегистрироваться</button>
+    <div id="registerError" class="error"></div>
+  </div>
+
+  <div id="loginForm" class="card" style="display:none">
+    <label>Email</label>
+    <input id="loginEmail" type="email" />
+    <label>Пароль</label>
+    <input id="loginPassword" type="password" />
+    <button id="btnLogin">Войти</button>
+    <div id="loginError" class="error"></div>
+  </div>
+</main>
+
+<script>
+document.getElementById("tabRegister").onclick = () => {
+  document.getElementById("tabRegister").classList.add("active");
+  document.getElementById("tabLogin").classList.remove("active");
+  document.getElementById("registerForm").style.display = "block";
+  document.getElementById("loginForm").style.display = "none";
+};
+document.getElementById("tabLogin").onclick = () => {
+  document.getElementById("tabLogin").classList.add("active");
+  document.getElementById("tabRegister").classList.remove("active");
+  document.getElementById("loginForm").style.display = "block";
+  document.getElementById("registerForm").style.display = "none";
+};
+
+document.getElementById("btnRegister").onclick = async () => {
+  const errBox = document.getElementById("registerError");
+  errBox.textContent = "";
+  const code = document.getElementById("inviteCode").value.trim();
+  const email = document.getElementById("regEmail").value.trim();
+  const password = document.getElementById("regPassword").value;
+
+  if (!code || !email || !password) {
+    errBox.textContent = "Заполни код, email и пароль.";
+    return;
+  }
+
+  const { data: invite, error: inviteErr } = await sb
+    .from("invites")
+    .select("*")
+    .eq("code", code)
+    .eq("is_used", false)
+    .maybeSingle();
+
+  if (inviteErr || !invite) {
+    errBox.textContent = "Инвайт-код неверный или уже использован.";
+    return;
+  }
+
+  const { data: signUpData, error: signUpErr } = await sb.auth.signUp({ email, password });
+  if (signUpErr) {
+    errBox.textContent = "Ошибка регистрации: " + signUpErr.message;
+    return;
+  }
+
+  let userId = signUpData.user ? signUpData.user.id : null;
+  if (!signUpData.session) {
+    const { data: loginData, error: loginErr } = await sb.auth.signInWithPassword({ email, password });
+    if (loginErr) {
+      errBox.textContent = "Аккаунт создан. Подтверди email и войди на вкладке «Вход».";
+      return;
+    }
+    userId = loginData.user.id;
+  }
+
+  await sb.from("invites").update({ is_used: true, used_by: userId }).eq("id", invite.id);
+  await sb.from("profiles").insert({ id: userId, name: email.split("@")[0] });
+
+  window.location.href = "onboarding.html";
+};
+
+document.getElementById("btnLogin").onclick = async () => {
+  const errBox = document.getElementById("loginError");
+  errBox.textContent = "";
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errBox.textContent = "Неверный email или пароль.";
+    return;
+  }
+  window.location.href = "feed.html";
+};
+
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) window.location.href = "feed.html";
+})();
+</script>
+</body>
+</html>
